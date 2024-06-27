@@ -1,0 +1,16 @@
+for (i in 1:n_data_subsets) {
+    er_prior[i] <- v(1,1,1,1,1,1)
+    er[i] ~ dnDirichlet(er_prior[i])
+    moves.append( mvBetaSimplex(er[i], alpha=10, tune=true, weight=3) )
+}
+
+
+for (i in 1:n_data_subsets) {
+    pi_prior[i] <- v(1,1,1,1)
+    pi[i] ~ dnDirichlet(pi_prior[i])
+    moves.append( mvBetaSimplex(pi[i], alpha=10, tune=true, weight=2) )
+}
+
+for (i in 1:n_data_subsets) {
+    Q[i] := fnGTR(er[i],pi[i])
+}

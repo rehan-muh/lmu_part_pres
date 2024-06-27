@@ -1,0 +1,119 @@
+clear()
+
+##########################
+#Reading-in Sequence Data#
+###########################
+
+
+#Put the path to the folder containing ringe_modified.nex on your machine here
+path = "/Users/loaner/Desktop/RevBayes/data/"
+
+filenames <- v(path + "ringelexicalcharacters.nex", path + "ringephonologicalcharacters.nex", path + "ringemorphologicalcharacters.nex")
+
+n_data_subsets <- filenames.size()
+
+### Read in sequence data
+for (i in 1:n_data_subsets){
+    data[i] = readDiscreteCharacterData(filenames[i])
+    num_sites[i] = data[i].nchar()
+}
+taxa <- data[1].taxa()
+n_taxa <- data[1].ntaxa()
+n_branches <- 2 * n_taxa - 3
+
+#############################
+#Setting up Moves and Monitors#
+#############################
+
+moves    = VectorMoves()
+monitors = VectorMonitors()
+
+anatolian = clade("HI", "LY", "LU")
+
+####################
+#Substitution Model#
+####################
+
+n_pi_cats = 4
+
+# Define F81 parameters for each dataset
+for (i in 1:n_data_subsets) {
+    pi_alpha[i] ~ dnExponential(1.0)
+    moves.append(mvScale(pi_alpha[i]))
+
+    pis[i] := fnDiscretizeBeta(pi_alpha[i], pi_alpha[i], n_pi_cats)
+
+    for (j in 1:n_pi_cats) {
+        pi[i][j] := simplex([abs(pis[i][j]), abs(1.0 - pis[i][j])])
+        Q[i][j] := fnF81(pi[i][j])
+    }
+
+    site_matrices[i] <- simplex(rep(1, n_pi_cats))
+}
+
+####################
+#Site-rate model#
+###################
+
+source("/Users/loaner/Desktop/lmu_pres/scripts/partition_models/site_variation/site_variation_part.Rev") #site-rate model
+
+##########################################################################################
+# Tree Model: Simple #
+##########################################################################################
+
+
+topology ~ dnUniformTopology(taxa, outgroup=anatolian)
+
+
+# These are moves that change the tree topology
+moves.append( mvNNI(topology, weight=n_taxa/2.0) )
+moves.append( mvSPR(topology, weight=n_taxa/10.0) )
+
+# Branch length prior
+for (i in 1:n_branches) {
+    bl[i] ~ dnExponential(10.0)
+    moves.append( mvScale(bl[i]) )
+}
+
+TL := sum(bl)
+
+psi := treeAssembly(topology, bl)
+
+###################
+# PhyloCTMC Model #
+###################
+
+for (i in 1:n_data_subsets) {
+    seq[i] ~ dnPhyloCTMC(tree=psi, Q=Q[i], siteRates=gamma_rates[i], pInv=pinvar[i], type="Standard", siteMatrices=site_matrices[i], coding="variable")
+    seq[i].clamp(data[i])
+}
+############
+# Analysis #
+############
+
+#You can use any node as the argument of model()
+my_model = model(psi)
+
+generations = 10
+
+monitors.append( mnScreen(printgen=10) )
+monitors.append( mnFile(psi, filename="output/ringe_f81_asrv_part.trees", printgen=10) )
+monitors.append( mnModel(filename="output/ringe_f81_asrv_part.log",printgen=10) )
+
+mymcmc = mcmc(my_model, moves, monitors, nruns=3, combine="mixed")
+mymcmc.run(2000,tuningInterval=100)
+
+#This gives you a summary of the MCMC chains
+mymcmc.operatorSummary()
+
+
+###################
+# Post processing #
+###################
+
+
+treetrace = readTreeTrace("output/ringe_f81_asrv_part.trees", outgroup=anatolian,  treetype="non-clock")
+
+map_tree = mapTree(treetrace, "output/ringe_f81_asrv_part_map.tree")
+
+mcc_tree = mccTree(treetrace, "output/ringe_f81_asrv_part_mcc.tree")

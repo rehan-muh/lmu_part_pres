@@ -1,0 +1,94 @@
+clear()
+
+##########################
+#Reading-in Sequence Data#
+###########################
+
+
+#Put the path to the folder containing ringe_modified.nex on your machine here
+path = "/Users/loaner/Desktop/RevBayes/data/"
+
+filenames <- v(path + "ringelexicalcharacters.nex", path + "ringephonologicalcharacters.nex", path + "ringemorphologicalcharacters.nex")
+
+n_data_subsets <- filenames.size()
+
+### Read in sequence data
+for (i in 1:n_data_subsets){
+    data[i] = readDiscreteCharacterData(filenames[i])
+    num_sites[i] = data[i].nchar()
+}
+taxa <- data[1].taxa()
+n_taxa <- data[1].ntaxa()
+n_branches <- 2 * n_taxa - 3
+
+#############################
+#Setting up Moves and Monitors#
+#############################
+
+moves    = VectorMoves()
+monitors = VectorMonitors()
+
+anatolian = clade("HI", "LY", "LU")
+
+####################
+#Subsitution Model##
+####################
+
+source("/Users/loaner/Desktop/lmu_pres/scripts/sub_models/substitution_model_gtr.Rev")
+
+####################
+#Site-rate model#
+###################
+
+source("/Users/loaner/Desktop/lmu_pres/scripts/partition_models/site_variation/site_variation_part.Rev") #site-rate model
+##########################################################################################
+# Tree Model: Gamma #
+##########################################################################################
+TL ~ dnGamma(2,4)
+moves.append( mvScale(TL) )
+rel_branch_lengths ~ dnDirichlet( rep(1.0,n_branches) )
+moves.append( mvBetaSimplex(rel_branch_lengths, weight=n_branches) )
+moves.append( mvDirichletSimplex(rel_branch_lengths, weight=n_branches/10.0) )
+br_lens := rel_branch_lengths * TL
+topology ~ dnUniformTopology(taxa)
+moves.append( mvNNI(topology, weight=n_taxa/2.0) )
+moves.append( mvSPR(topology, weight=n_taxa/10.0) )
+psi := treeAssembly(topology, br_lens)
+
+###################
+# PhyloCTMC Model #
+###################
+
+for (i in 1:n_data_subsets) {
+    seq[i] ~ dnPhyloCTMC(tree=psi, Q=Q[i], siteRates=gamma_rates[i], pInv=pinvar[i], type="Standard")
+    seq[i].clamp(data[i])
+}
+
+
+
+############
+# Analysis #
+############
+
+#You can use any node as the argument of model()
+mymodel = model(psi)
+
+
+####################################
+# Run the power-posterior analysis #
+####################################
+
+pow_p = powerPosterior(mymodel, moves, monitors, "output/ringe_gtr_g_i_part_gamma_br_lens_comp_powp.out", cats=50, sampleFreq=10)
+#pow_p.burnin(generations=0,tuningInterval=200)
+pow_p.run(generations=1000)
+
+###################################
+# Run the stepping-stone analysis #
+###################################
+
+ss = steppingStoneSampler(file="output/ringe_gtr_g_i_part_gamma_br_lens_comp_powp.out", powerColumnName="power", likelihoodColumnName="likelihood")
+
+write("Stepping stone marginal likelihood:\t", ss.marginal() )
+
+ps = pathSampler(file="output/ringe_gtr_g_i_part_gamma_br_lens_comp_powp.out", powerColumnName="power", likelihoodColumnName="likelihood")
+write("Path-sampling marginal likelihood:\t", ps.marginal() )

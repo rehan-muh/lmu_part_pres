@@ -1,0 +1,105 @@
+clear()
+
+#Put the path to the folder containing ringe_modified.nex on your machine here
+path = "/Users/loaner/Desktop/RevBayes/data/"
+
+### Read in sequence data
+data <- readDiscreteCharacterData(path + "binary_screened.nex")
+
+# Get some useful variables from the data. We need these later on.
+n_taxa <- data.ntaxa()
+
+#Number of branches in an unrooted tree
+n_branches <- 2 * n_taxa - 3
+
+#Number of branches in a rooted tree
+#n_branches <- 2 * n_taxa - 2
+
+taxa <- data.taxa()
+
+
+moves    = VectorMoves()
+monitors = VectorMonitors()
+
+anatolian = clade("HI", "LY", "LU")
+
+#####################
+# F81 Mixture Model #
+#####################
+
+# number of categories of stationary frequencies (pi)
+n_pi_cats = 4
+
+pi_alpha ~ dnExponential(1.0)
+moves.append( mvScale(pi_alpha) )
+
+pis := fnDiscretizeBeta(pi_alpha, pi_alpha, n_pi_cats)
+
+for(i in 1:n_pi_cats) {
+  pi[i] := simplex([ abs(pis[i]), abs(1.0 - pis[i])])
+  Q[i]  := fnF81(pi[i])
+}
+
+site_matrices <- simplex( rep(1,n_pi_cats) )
+
+##############
+# Tree model #
+##############
+
+topology ~ dnUniformTopology(taxa, outgroup=anatolian)
+
+
+# These are moves that change the tree topology
+moves.append( mvNNI(topology, weight=n_taxa/2.0) )
+moves.append( mvSPR(topology, weight=n_taxa/10.0) )
+
+# Branch length prior
+for (i in 1:n_branches) {
+    bl[i] ~ dnExponential(10.0)
+    moves.append( mvScale(bl[i]) )
+}
+
+TL := sum(bl)
+
+psi := treeAssembly(topology, bl)
+
+###################
+# PhyloCTMC Model #
+###################
+
+# the sequence evolution model
+seq ~ dnPhyloCTMC(tree=psi, Q=Q, type="Standard", siteMatrices=site_matrices, coding="variable")
+
+# attach the data
+seq.clamp(data)
+
+############
+# Analysis #
+############
+
+#You can use any node as the argument of model()
+my_model = model(psi)
+
+generations = 10
+
+monitors.append( mnScreen(TL, printgen=1000) )
+monitors.append( mnFile(psi, filename="output/ringe_jc_inform_f81.trees", printgen=10) )
+monitors.append( mnModel(filename="output/ringe_jc_inform.log",printgen=10) )
+
+mymcmc = mcmc(my_model, moves, monitors)
+mymcmc.run(1000,tuningInterval=100)
+
+#This gives you a summary of the MCMC chains
+mymcmc.operatorSummary()
+
+
+###################
+# Post processing #
+###################
+
+
+treetrace = readTreeTrace("output/ringe_jc_inform_f81.trees", outgroup=anatolian,  treetype="non-clock")
+
+map_tree = mapTree(treetrace, "output/ringe_jc_inform_f81_map.tree")
+
+mcc_tree = mccTree(treetrace, "output/ringe_jc_inform_f81_mcc.tree")

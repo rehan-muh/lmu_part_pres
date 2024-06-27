@@ -1,0 +1,22 @@
+##############################
+# Among-Site Rate Variation####
+###############################
+# alpha is the shape parameter; the higher the alpha, the more symmetric the distribution.
+for (i in 1:n_data_subsets) {
+alpha[i] ~ dnUniform(0, 1E8)
+gamma_rates[i] := fnDiscretizeGamma(alpha[i], alpha[i], 4, false)
+# 4 is the number of discrete rate categories.
+# alpha, alpha specifies the distribution parameters; we assume the shape parameter alpha equals the rate parameter beta, and we the distribution consequently is centered at 1.0
+moves.append(mvScale(alpha[i], lambda=0.1, tune=false, weight=4.0))
+}
+#######################################
+
+####################################
+###        Invariant Sites         #
+####################################
+for (i in 1:n_data_subsets) {
+pinvar[i] ~ dnBeta(10,10)
+# this results in a uniform distribution; we can increase the value of the parameters alpha and beta (1,1 in this case) to make the probability mass more centered on on the mean.
+moves.append( mvBetaProbability(pinvar[i], delta=10.0, tune=true, weight=2.0) )
+}
+#####################################

@@ -1,0 +1,103 @@
+clear()
+
+#Put the path to the folder containing ringe_modified.nex on your machine here
+path = "/Users/loaner/Desktop/RevBayes/data/"
+
+### Read in sequence data
+data <- readDiscreteCharacterData(path + "binary_screened.nex")
+
+# Get some useful variables from the data. We need these later on.
+n_taxa <- data.ntaxa()
+
+#Number of branches in an unrooted tree
+n_branches <- 2 * n_taxa - 3
+
+#Number of branches in a rooted tree
+#n_branches <- 2 * n_taxa - 2
+
+taxa <- data.taxa()
+
+
+moves    = VectorMoves()
+monitors = VectorMonitors()
+
+anatolian = clade("HI", "LY", "LU")
+
+#####################
+# GTR Model #
+#####################
+# transition probabilities and the moves associated with the base frequencies
+    er_prior <- v(1,1,1,1,1,1)
+    er ~ dnDirichlet(er_prior)
+    moves.append( mvBetaSimplex(er, alpha=10, tune=true, weight=3) )
+# base frequencies and the moves associated with the base frequencies
+    pi_prior <- v(1,1,1,1)
+    pi ~ dnDirichlet(pi_prior)
+    moves.append( mvBetaSimplex(pi, alpha=10, tune=true, weight=2) )
+
+    Q := fnGTR(er,pi)
+
+
+
+##############################
+# Among-Site Rate Variation####
+###############################
+
+source("/Users/loaner/Desktop/RevBayes/scripts/mcmc/site_variation.Rev")
+
+##############
+# Tree model #
+##############
+
+topology ~ dnUniformTopology(taxa, outgroup=anatolian)
+
+
+# These are moves that change the tree topology
+moves.append( mvNNI(topology, weight=n_taxa/2.0) )
+moves.append( mvSPR(topology, weight=n_taxa/10.0) )
+
+# Branch length prior
+for (i in 1:n_branches) {
+    bl[i] ~ dnExponential(10.0)
+    moves.append( mvScale(bl[i]) )
+}
+
+TL := sum(bl)
+
+psi := treeAssembly(topology, bl)
+
+###################
+# PhyloCTMC Model #
+###################
+
+# the sequence evolution model
+seq ~ dnPhyloCTMC(tree=psi, Q=Q, type="Standard", siteRates=gamma_rates, pInv = pinvar, coding="variable")
+
+# attach the data
+seq.clamp(data)
+
+############
+# Analysis #
+############
+
+#You can use any node as the argument of model()
+my_model = model(psi)
+
+####################################
+# Run the power-posterior analysis #
+####################################
+
+pow_p = powerPosterior(my_model, moves, monitors, "output/ringe_f81_asrv_part_np_powp.out", cats=50, sampleFreq=10)
+#pow_p.burnin(generations=0,tuningInterval=200)
+pow_p.run(generations=1000)
+
+###################################
+# Run the stepping-stone analysis #
+###################################
+
+ss = steppingStoneSampler(file="output/ringe_f81_asrv_part_np_powp.out", powerColumnName="power", likelihoodColumnName="likelihood")
+
+write("Stepping stone marginal likelihood:\t", ss.marginal() )
+
+ps = pathSampler(file="output/ringe_f81_asrv_part_np_powp.out", powerColumnName="power", likelihoodColumnName="likelihood")
+write("Path-sampling marginal likelihood:\t", ps.marginal() )
